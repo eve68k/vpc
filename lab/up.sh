@@ -11,8 +11,6 @@ set -euo pipefail
 NS_PVE=(pve1 pve2)
 UNDERLAY_MTU=1500
 VM_MTU=1450   # カプセル化 (約50B) 分を引く
-VM_SUBNET=10.10.0
-GW_IP=${VM_SUBNET}.254
 
 for ns in pve1 pve2 vm1 vm2; do
   ip netns add "$ns"
@@ -36,8 +34,7 @@ for i in 1 2; do
   ip -n "pve${i}" link set "tap-vm${i}" up
   ip -n "vm${i}" link set eth0 address "02:00:00:00:00:0${i}"
   ip -n "vm${i}" link set eth0 mtu "$VM_MTU" up
-  ip -n "vm${i}" addr add "${VM_SUBNET}.${i}/24" dev eth0
-  ip -n "vm${i}" route add default via "$GW_IP"
+  # VM のIPは静的に振らず DHCP で取得させる
 
   # virtio 相当のオフロードを無効化（チェックサム未計算フレーム対策）
   ip netns exec "vm${i}"  ethtool -K eth0 tx off rx off tso off gso off gro off >/dev/null 2>&1 || true
@@ -45,6 +42,6 @@ for i in 1 2; do
 done
 
 echo "lab is up:"
-echo "  vm1 ${VM_SUBNET}.1 (pve1) / vm2 ${VM_SUBNET}.2 (pve2), gw ${GW_IP}"
+echo "  vm1 (pve1) / vm2 (pve2): IP は DHCP で取得"
 echo "  underlay: pve1=192.168.100.1 pve2=192.168.100.2"
 echo "例: ip netns exec pve1 ./bin/vpc-agent -port-if tap-vm1"
