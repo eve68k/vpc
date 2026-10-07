@@ -31,6 +31,7 @@ func TestMessage_BuildしてParseすると同じ内容が復元される(t *test
 				ServerID:   net.IPv4(10, 10, 0, 254),
 				LeaseTime:  3600,
 				SubnetMask: net.IPv4(255, 255, 255, 0),
+				Router:     net.IPv4(10, 10, 0, 1),
 			},
 		},
 		{
@@ -93,6 +94,9 @@ func TestMessage_BuildしてParseすると同じ内容が復元される(t *test
 			}
 			if !ipEqual(got.SubnetMask, c.msg.SubnetMask) {
 				t.Errorf("SubnetMask: got %v, want %v", got.SubnetMask, c.msg.SubnetMask)
+			}
+			if !ipEqual(got.Router, c.msg.Router) {
+				t.Errorf("Router: got %v, want %v", got.Router, c.msg.Router)
 			}
 		})
 	}

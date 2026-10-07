@@ -39,6 +39,7 @@ type optionCode uint8
 
 const (
 	optionSubnetMask  optionCode = 1
+	optionRouter      optionCode = 3
 	optionRequestedIP optionCode = 50
 	optionLeaseTime   optionCode = 51
 	optionMessageType optionCode = 53
@@ -47,7 +48,7 @@ const (
 	optionEnd         optionCode = 255
 )
 
-// Message は DHCP メッセージ。オプションは最小限（type/requested IP/server ID/lease/subnet mask）のみ保持する。
+// Message は DHCP メッセージ。オプションは最小限（type/requested IP/server ID/lease/subnet mask/router）のみ保持する。
 type Message struct {
 	Op     OpCode
 	Xid    uint32
@@ -63,6 +64,7 @@ type Message struct {
 	ServerID    net.IP
 	LeaseTime   uint32
 	SubnetMask  net.IP
+	Router      net.IP // option 3 の先頭1件のみ保持する
 }
 
 // Parse は DHCP メッセージをパースする。b は UDP ペイロード全体。
@@ -131,6 +133,10 @@ func (m *Message) parseOptions(opts []byte) error {
 			if l == 4 {
 				m.SubnetMask = cloneIP(v)
 			}
+		case optionRouter:
+			if l >= 4 && l%4 == 0 {
+				m.Router = cloneIP(v[:4])
+			}
 		}
 		i += l
 	}
@@ -166,6 +172,9 @@ func (m *Message) Build() []byte {
 	}
 	if m.SubnetMask != nil {
 		out = appendOption(out, optionSubnetMask, m.SubnetMask.To4())
+	}
+	if m.Router != nil {
+		out = appendOption(out, optionRouter, m.Router.To4())
 	}
 	return append(out, byte(optionEnd))
 }

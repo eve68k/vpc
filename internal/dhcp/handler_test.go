@@ -163,6 +163,9 @@ func TestHandler_DiscoverフレームからOfferが届く(t *testing.T) {
 	if want := net.IPv4(255, 255, 255, 0); !msg.SubnetMask.Equal(want) {
 		t.Errorf("SubnetMask: got %v, want %v", msg.SubnetMask, want)
 	}
+	if !msg.Router.Equal(testServerIP) {
+		t.Errorf("Router: got %v, want %v", msg.Router, testServerIP)
+	}
 	if msg.LeaseTime != 3600 {
 		t.Errorf("LeaseTime: got %d, want 3600", msg.LeaseTime)
 	}

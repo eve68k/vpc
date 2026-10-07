@@ -84,6 +84,7 @@ func (h *Handler) reply(req *Message, t MessageType, lease mapping.Lease) (*Mess
 		ServerID:   serverIP,
 		LeaseTime:  lease.LeaseTime,
 		SubnetMask: net.IP(lease.Subnet.Mask),
+		Router:     serverIP,
 	}, serverIP
 }
 
