@@ -10,8 +10,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 
 	"github.com/eve68k/vpc/internal/dhcp"
@@ -23,10 +21,7 @@ func main() {
 	kind := flag.String("port-kind", "afpacket", "Port 実装 (afpacket)")
 	ifname := flag.String("port-if", "", "VM 側に向くインターフェース名 (tap / veth)")
 	dhcpServerMAC := flag.String("dhcp-server-mac", "02:00:00:00:00:fe", "DHCPサーバとして名乗るMACアドレス")
-	dhcpServerIP := flag.String("dhcp-server-ip", "10.10.0.254", "DHCPサーバ識別子・ゲートウェイとして配布するIP")
-	dhcpSubnetMask := flag.String("dhcp-subnet-mask", "255.255.255.0", "配布するサブネットマスク")
-	dhcpLeaseSeconds := flag.Uint("dhcp-lease-seconds", 3600, "配布するリース時間(秒)")
-	dhcpPool := flag.String("dhcp-pool", "", "DHCPで配布するIPのカンマ区切りリスト（モックMappingService用）")
+	dhcpVPCID := flag.Uint("dhcp-vpc-id", 1, "このPortが所属するVPCのID（モックMappingService用）")
 	flag.Parse()
 	if *ifname == "" {
 		log.Fatal("-port-if is required")
@@ -42,7 +37,7 @@ func main() {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() { <-sig; p.Close() }()
 
-	h, err := newDHCPHandler(*dhcpServerMAC, *dhcpServerIP, *dhcpSubnetMask, uint32(*dhcpLeaseSeconds), *dhcpPool)
+	h, err := newDHCPHandler(*dhcpServerMAC, p.Name(), mapping.VPCID(*dhcpVPCID))
 	if err != nil {
 		log.Fatalf("dhcp setup: %v", err)
 	}
@@ -77,46 +72,27 @@ func main() {
 	}
 }
 
-func newDHCPHandler(serverMAC, serverIP, subnetMask string, leaseSeconds uint32, pool string) (*dhcp.Handler, error) {
+func newDHCPHandler(serverMAC, portName string, vpcID mapping.VPCID) (*dhcp.Handler, error) {
 	mac, err := net.ParseMAC(serverMAC)
 	if err != nil {
 		return nil, err
 	}
-	ip := net.ParseIP(serverIP)
-	if ip == nil {
-		return nil, errors.New("invalid -dhcp-server-ip")
-	}
-	mask := net.ParseIP(subnetMask)
-	if mask == nil {
-		return nil, errors.New("invalid -dhcp-subnet-mask")
-	}
 
-	ips, err := parseIPPool(pool)
+	// 本物のMappingServiceクライアントに差し替えるまでの暫定値。
+	_, subnet, err := net.ParseCIDR("10.10.0.0/24")
 	if err != nil {
 		return nil, err
 	}
+	var pool []net.IP
+	for i := 2; i < 254; i++ { // .1 はゲートウェイ
+		pool = append(pool, net.IPv4(10, 10, 0, byte(i)))
+	}
 
 	return &dhcp.Handler{
-		Mapping:    mapping.NewMock(ips),
-		ServerMAC:  mac,
-		ServerIP:   ip,
-		SubnetMask: mask,
-		LeaseTime:  leaseSeconds,
+		Mapping: mapping.NewMock(
+			map[string]mapping.VPCID{portName: vpcID},
+			map[mapping.VPCID]mapping.VPCConfig{vpcID: {Subnet: subnet, Pool: pool, LeaseTime: 3600}},
+		),
+		ServerMAC: mac,
 	}, nil
-}
-
-func parseIPPool(pool string) ([]net.IP, error) {
-	var ips []net.IP
-	for _, s := range strings.Split(pool, ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		ip := net.ParseIP(s)
-		if ip == nil {
-			return nil, errors.New("invalid IP in -dhcp-pool: " + strconv.Quote(s))
-		}
-		ips = append(ips, ip)
-	}
-	return ips, nil
 }

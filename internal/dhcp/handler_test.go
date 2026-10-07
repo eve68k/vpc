@@ -12,7 +12,7 @@ import (
 
 var (
 	testServerMAC = net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0xfe}
-	testServerIP  = net.IPv4(10, 10, 0, 254)
+	testServerIP  = net.IPv4(10, 10, 0, 1)
 	testClientMAC = net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0x01}
 )
 
@@ -33,14 +33,18 @@ func buildClientFrame(t *testing.T, msg *Message) []byte {
 	return out
 }
 
+const testVPCID mapping.VPCID = 1
+
+// newTestHandler は "server" という名前のPortがVPC 1（10.10.0.0/24）に所属するHandlerを返す。
 func newTestHandler() *Handler {
-	pool := []net.IP{net.IPv4(10, 10, 0, 1), net.IPv4(10, 10, 0, 2)}
+	_, subnet, _ := net.ParseCIDR("10.10.0.0/24")
+	pool := []net.IP{net.IPv4(10, 10, 0, 2), net.IPv4(10, 10, 0, 3)}
 	return &Handler{
-		Mapping:    mapping.NewMock(pool),
-		ServerMAC:  testServerMAC,
-		ServerIP:   testServerIP,
-		SubnetMask: net.IPv4(255, 255, 255, 0),
-		LeaseTime:  3600,
+		Mapping: mapping.NewMock(
+			map[string]mapping.VPCID{"server": testVPCID},
+			map[mapping.VPCID]mapping.VPCConfig{testVPCID: {Subnet: subnet, Pool: pool, LeaseTime: 3600}},
+		),
+		ServerMAC: testServerMAC,
 	}
 }
 
@@ -147,10 +151,21 @@ func TestHandler_DiscoverフレームからOfferが届く(t *testing.T) {
 	if msg.Type != MessageTypeOffer {
 		t.Errorf("Type: got %v, want Offer", msg.Type)
 	}
-	if !msg.YIAddr.Equal(net.IPv4(10, 10, 0, 1)) {
-		t.Errorf("YIAddr: got %v, want 10.10.0.1", msg.YIAddr)
+	if !msg.YIAddr.Equal(net.IPv4(10, 10, 0, 2)) {
+		t.Errorf("YIAddr: got %v, want 10.10.0.2", msg.YIAddr)
 	}
-	_ = ip
+	if !ip.Src.Equal(testServerIP) {
+		t.Errorf("src IP: got %v, want %v", ip.Src, testServerIP)
+	}
+	if !msg.ServerID.Equal(testServerIP) {
+		t.Errorf("ServerID: got %v, want %v", msg.ServerID, testServerIP)
+	}
+	if want := net.IPv4(255, 255, 255, 0); !msg.SubnetMask.Equal(want) {
+		t.Errorf("SubnetMask: got %v, want %v", msg.SubnetMask, want)
+	}
+	if msg.LeaseTime != 3600 {
+		t.Errorf("LeaseTime: got %d, want 3600", msg.LeaseTime)
+	}
 }
 
 func TestHandler_RequestしたIPがMappingServiceと一致すればAckが届く(t *testing.T) {
@@ -158,7 +173,8 @@ func TestHandler_RequestしたIPがMappingServiceと一致すればAckが届く(
 	h := newTestHandler()
 
 	// 同じMACで先にDiscoverさせ、割り当てを確定させる。
-	allocated, _ := h.Mapping.Lookup(testClientMAC)
+	lease, _ := h.Mapping.Lookup(testVPCID, testClientMAC)
+	allocated := lease.IP
 
 	request := buildClientFrame(t, &Message{
 		Op:          OpBootRequest,
@@ -200,7 +216,7 @@ func TestHandler_RequestしたIPがMappingServiceと一致すればAckが届く(
 func TestHandler_割り当てと異なるRequestedIPは無視される(t *testing.T) {
 	a, b := port.NewMemPair("client", "server")
 	h := newTestHandler()
-	h.Mapping.Lookup(testClientMAC) // 先に割り当てておく
+	h.Mapping.Lookup(testVPCID, testClientMAC) // 先に割り当てておく
 
 	request := buildClientFrame(t, &Message{
 		Op:          OpBootRequest,
@@ -239,6 +255,42 @@ func TestHandler_割り当てと異なるRequestedIPは無視される(t *testin
 	}
 	a.Close()
 	b.Close()
+}
+
+func TestHandler_VPCに属さないPortのフレームには応答しない(t *testing.T) {
+	a, b := port.NewMemPair("client", "unknown")
+	h := newTestHandler()
+
+	discover := buildClientFrame(t, &Message{Op: OpBootRequest, CHAddr: testClientMAC, Type: MessageTypeDiscover})
+	handled, err := h.HandleFrame(discover, b)
+	if err != nil {
+		t.Fatalf("HandleFrame: %v", err)
+	}
+	if !handled {
+		t.Fatalf("got handled=false, want true")
+	}
+
+	result := make(chan struct{}, 1)
+	go func() {
+		rb := make([]byte, 2048)
+		if _, err := a.ReadFrame(rb); err == nil {
+			result <- struct{}{}
+		}
+	}()
+	select {
+	case <-result:
+		t.Fatalf("got a reply frame, want none")
+	case <-time.After(50 * time.Millisecond):
+	}
+	a.Close()
+	b.Close()
+}
+
+func TestGatewayOf_ネットワークアドレスの次のIPを返す(t *testing.T) {
+	_, subnet, _ := net.ParseCIDR("192.168.5.0/24")
+	if got, want := gatewayOf(subnet), net.IPv4(192, 168, 5, 1); !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
 }
 
 // identifyReply はテスト専用の、サーバ→クライアント方向フレーム用の浅い判定ヘルパー。

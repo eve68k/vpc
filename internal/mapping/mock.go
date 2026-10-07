@@ -5,31 +5,59 @@ import (
 	"sync"
 )
 
+// VPCConfig はモックが VPC ごとに保持する静的な設定。
+type VPCConfig struct {
+	Subnet    *net.IPNet
+	Pool      []net.IP
+	LeaseTime uint32
+}
+
 // mockService はプールから順に割り当てるだけのインメモリ実装。
 type mockService struct {
-	mu    sync.Mutex
-	pool  []net.IP
+	portVPC map[string]VPCID
+
+	mu   sync.Mutex
+	vpcs map[VPCID]*mockVPC
+}
+
+type mockVPC struct {
+	cfg   VPCConfig
 	next  int
 	byMAC map[string]net.IP
 }
 
-// NewMock は pool からMACごとに順番にIPを割り当てる Service を返す。
-func NewMock(pool []net.IP) Service {
-	return &mockService{pool: pool, byMAC: make(map[string]net.IP)}
+// NewMock は portVPC（Port名 → VPCID）と vpcs（VPCID → 設定）から、
+// VPCごとのプールでMACごとに順番にIPを割り当てる Service を返す。
+func NewMock(portVPC map[string]VPCID, vpcs map[VPCID]VPCConfig) Service {
+	m := &mockService{portVPC: portVPC, vpcs: make(map[VPCID]*mockVPC, len(vpcs))}
+	for id, cfg := range vpcs {
+		m.vpcs[id] = &mockVPC{cfg: cfg, byMAC: make(map[string]net.IP)}
+	}
+	return m
 }
 
-func (m *mockService) Lookup(mac net.HardwareAddr) (net.IP, bool) {
+func (m *mockService) VPCForPort(portName string) (VPCID, bool) {
+	id, ok := m.portVPC[portName]
+	return id, ok
+}
+
+func (m *mockService) Lookup(vpcID VPCID, mac net.HardwareAddr) (Lease, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if ip, ok := m.byMAC[mac.String()]; ok {
-		return ip, true
+	v, ok := m.vpcs[vpcID]
+	if !ok {
+		return Lease{}, false
 	}
-	if m.next >= len(m.pool) {
-		return nil, false
+
+	ip, ok := v.byMAC[mac.String()]
+	if !ok {
+		if v.next >= len(v.cfg.Pool) {
+			return Lease{}, false
+		}
+		ip = v.cfg.Pool[v.next]
+		v.next++
+		v.byMAC[mac.String()] = ip
 	}
-	ip := m.pool[m.next]
-	m.next++
-	m.byMAC[mac.String()] = ip
-	return ip, true
+	return Lease{IP: ip, Subnet: v.cfg.Subnet, LeaseTime: v.cfg.LeaseTime}, true
 }

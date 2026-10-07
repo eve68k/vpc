@@ -4,9 +4,23 @@ package mapping
 
 import "net"
 
-// Service は mac に割り当てる IP を問い合わせる。
+// VPCID は VPC の識別子。独自のカプセル化ヘッダにそのまま埋め込むため、
+// 可変長の string ではなく固定長の整数にする（design.md の VNI 相当）。
+type VPCID uint32
+
+// Lease は VPC 内で mac に割り当てる（または割り当て済みの）リース情報。
+type Lease struct {
+	IP        net.IP
+	Subnet    *net.IPNet // ネットワークアドレス + マスク。ゲートウェイは Subnet から導出する。
+	LeaseTime uint32
+}
+
+// Service は VPC ごとの割り当て情報を問い合わせる。
+// キャッシュするかどうかは実装側の詳細であり、呼び出し側は関知しない。
 type Service interface {
-	// Lookup は mac に割り当てる（または既に割り当て済みの）IP を返す。
+	// VPCForPort は port 名からその port が所属する VPC の識別子を返す。
+	VPCForPort(portName string) (vpcID VPCID, ok bool)
+	// Lookup は vpcID 内で mac に割り当てるリース情報を返す。
 	// ok=false はその MAC に割り当てられる IP がないことを示す。
-	Lookup(mac net.HardwareAddr) (ip net.IP, ok bool)
+	Lookup(vpcID VPCID, mac net.HardwareAddr) (lease Lease, ok bool)
 }

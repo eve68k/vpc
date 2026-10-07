@@ -17,11 +17,8 @@ const (
 // フロー全体の状態は追わず（Discoverを覚えていなくてもRequestだけ単独で処理できる）、
 // MAC↔IPの対応という「状態」はMappingServiceを正本として都度問い合わせる。
 type Handler struct {
-	Mapping    mapping.Service
-	ServerMAC  net.HardwareAddr
-	ServerIP   net.IP
-	SubnetMask net.IP
-	LeaseTime  uint32
+	Mapping   mapping.Service
+	ServerMAC net.HardwareAddr // VPC共通の固定MAC
 }
 
 // HandleFrame はフレームを受け取り、クライアント→サーバ方向のDHCPメッセージであれば
@@ -37,12 +34,18 @@ func (h *Handler) HandleFrame(b []byte, p port.Port) (handled bool, err error) {
 		return true, err
 	}
 
+	vpcID, ok := h.Mapping.VPCForPort(p.Name())
+	if !ok {
+		return true, nil
+	}
+
 	var reply *Message
+	var serverIP net.IP
 	switch msg.Type {
 	case MessageTypeDiscover:
-		reply = h.handleDiscover(msg)
+		reply, serverIP = h.handleDiscover(vpcID, msg)
 	case MessageTypeRequest:
-		reply = h.handleRequest(msg)
+		reply, serverIP = h.handleRequest(vpcID, msg)
 	default:
 		return true, nil
 	}
@@ -50,36 +53,48 @@ func (h *Handler) HandleFrame(b []byte, p port.Port) (handled bool, err error) {
 		return true, nil
 	}
 
-	return true, p.WriteFrame(h.buildReplyFrame(eth.Src, reply))
+	return true, p.WriteFrame(h.buildReplyFrame(eth.Src, serverIP, reply))
 }
 
-func (h *Handler) handleDiscover(req *Message) *Message {
-	ip, ok := h.Mapping.Lookup(req.CHAddr)
+func (h *Handler) handleDiscover(vpcID mapping.VPCID, req *Message) (*Message, net.IP) {
+	lease, ok := h.Mapping.Lookup(vpcID, req.CHAddr)
 	if !ok {
-		return nil
+		return nil, nil
 	}
-	return h.reply(req, MessageTypeOffer, ip)
+	return h.reply(req, MessageTypeOffer, lease)
 }
 
-func (h *Handler) handleRequest(req *Message) *Message {
-	ip, ok := h.Mapping.Lookup(req.CHAddr)
-	if !ok || req.RequestedIP == nil || !ip.Equal(req.RequestedIP) {
-		return nil // 対応が存在しなければ無視（NAKは今後）
+func (h *Handler) handleRequest(vpcID mapping.VPCID, req *Message) (*Message, net.IP) {
+	lease, ok := h.Mapping.Lookup(vpcID, req.CHAddr)
+	if !ok || req.RequestedIP == nil || !lease.IP.Equal(req.RequestedIP) {
+		return nil, nil // 対応が存在しなければ無視（NAKは今後）
 	}
-	return h.reply(req, MessageTypeACK, ip)
+	return h.reply(req, MessageTypeACK, lease)
 }
 
-func (h *Handler) reply(req *Message, t MessageType, yiaddr net.IP) *Message {
+// reply は応答メッセージと、応答の送信元に使うサーバIP（ゲートウェイ）を返す。
+func (h *Handler) reply(req *Message, t MessageType, lease mapping.Lease) (*Message, net.IP) {
+	serverIP := gatewayOf(lease.Subnet)
 	return &Message{
 		Op:         OpBootReply,
 		Xid:        req.Xid,
-		YIAddr:     yiaddr,
+		YIAddr:     lease.IP,
 		CHAddr:     req.CHAddr,
 		Type:       t,
-		ServerID:   h.ServerIP,
-		LeaseTime:  h.LeaseTime,
-		SubnetMask: h.SubnetMask,
-	}
+		ServerID:   serverIP,
+		LeaseTime:  lease.LeaseTime,
+		SubnetMask: net.IP(lease.Subnet.Mask),
+	}, serverIP
+}
+
+// gatewayOf は subnet のネットワークアドレス+1 を返す。
+// MappingServiceにゲートウェイIPを返させず、サブネットから導出する。
+func gatewayOf(subnet *net.IPNet) net.IP {
+	base := subnet.IP.To4()
+	ip := make(net.IP, net.IPv4len)
+	copy(ip, base)
+	ip[3]++
+	return ip
 }
 
 // identifyRequest はフレームが「クライアント→サーバ方向のDHCPメッセージ」かどうかを
@@ -104,17 +119,17 @@ func identifyRequest(b []byte) (eth frame.Ethernet, ip frame.IPv4, udp frame.UDP
 	return eth, ip, udp, true
 }
 
-func (h *Handler) buildReplyFrame(clientMAC net.HardwareAddr, reply *Message) []byte {
+func (h *Handler) buildReplyFrame(clientMAC net.HardwareAddr, serverIP net.IP, reply *Message) []byte {
 	payload := reply.Build()
 	udpLen := frame.UDPHeaderLen + len(payload)
 	out := make([]byte, frame.EtherHeaderLen+frame.IPv4HeaderLen+udpLen)
 
 	dstIP := net.IPv4bcast
 	ipPayload := frame.BuildEthernet(out, h.ServerMAC, clientMAC, frame.EtherTypeIPv4)
-	udpSegment := frame.BuildIPv4(ipPayload, frame.IPProtocolUDP, h.ServerIP, dstIP, udpLen)
+	udpSegment := frame.BuildIPv4(ipPayload, frame.IPProtocolUDP, serverIP, dstIP, udpLen)
 	dhcpPayload := frame.BuildUDP(udpSegment, ServerPort, ClientPort, len(payload))
 	copy(dhcpPayload, payload)
-	frame.SetUDPChecksum(udpSegment, h.ServerIP, dstIP)
+	frame.SetUDPChecksum(udpSegment, serverIP, dstIP)
 
 	return out
 }
