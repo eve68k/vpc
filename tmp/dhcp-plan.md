@@ -108,7 +108,9 @@ Offer/AckフレームをEthernet+IPv4+UDP+DHCPで組み立てて `port.Port.Writ
 ```go
 package mapping
 
-type VPCID string
+// VPCID は VPC の識別子。独自のカプセル化ヘッダにそのまま埋め込むため、
+// 可変長の string ではなく固定長の整数にする（design.md の VNI 相当）。
+type VPCID uint32
 
 // Lease は VPC 内で mac に割り当てる（または割り当て済みの）リース情報。
 type Lease struct {
@@ -141,17 +143,22 @@ type Handler struct {
 
 ### `mock.go` の変更
 
-- 単一プールではなく、`VPCID → (サブネット, プール, リース時間)` のマップと、
+- 単一プールではなく、`VPCID(uint32) → (サブネット, プール, リース時間)` のマップと、
   `Port名 → VPCID` のマップを持つ。
+- サブネットはVPC固有の情報であり、`Lease.Subnet` として `mapping.Service` が返す。
+  モックはそれを内部に持つ値として保持し、`dhcp` / `main.go` 側は関知しない。
 - 現状1エージェント=1Portなので、モックの設定もその範囲で十分
   （複数VPC対応は本物のMappingService連携issueに回す）。
 
 ### `main.go` / フラグの変更
 
-- 削除：`-dhcp-server-ip`、`-dhcp-subnet-mask`（→ `-dhcp-subnet` のCIDR表記に統合）
-- 追加：`-dhcp-vpc-id`（モックが「このPortはこのVPC」と答えるための値）、
-  `-dhcp-subnet`（例 `"10.10.0.0/24"`）
-- 維持：`-dhcp-server-mac`、`-dhcp-lease-seconds`、`-dhcp-pool`
+- 削除：`-dhcp-server-ip`、`-dhcp-subnet-mask`、`-dhcp-lease-seconds`、`-dhcp-pool`
+  （サブネット・リース時間・プールはいずれもVPC固有の情報なので、フラグでは受けず
+  MappingServiceから取得する。`-dhcp-subnet` は追加しない）
+- 追加：`-dhcp-vpc-id`（モックが「このPortはこのVPC」と答えるための値。`uint32` としてパースする）
+- 維持：`-dhcp-server-mac`（VPC共通の固定値のため）
+- モックが返すサブネット・リース時間・プールは、`NewMock` の引数としてモック生成箇所で与える。
+  本物のクライアントに差し替える時点でこの配線ごと不要になる。
 
 ### 残課題（後続issue）
 
