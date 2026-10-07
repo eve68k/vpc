@@ -81,3 +81,80 @@ Offer/AckフレームをEthernet+IPv4+UDP+DHCPで組み立てて `port.Port.Writ
 ### Phase 7 — `vpc-agent` への組み込み
 
 現在ログだけのループに識別→分岐を差し込み、DHCP以外のフレームは当面無視（または既存ログ）にする。
+
+## Phase 8（仮）— MappingService連携への移行プラン
+
+現状、`dhcp-server-ip` / `dhcp-subnet-mask` / `dhcp-lease-seconds` / `dhcp-pool` は起動フラグで固定しているが、
+本来これらはVPCごとにMappingServiceから得る情報。以下の論点を決定した。
+
+### 決定事項
+
+1. **問い合わせ方式**：VPC単位の静的情報（サブネット、リース時間）とMACごとの割当IPを
+   1回の `Lookup` にバンドルして返す。`dhcp.Handler` は都度問い合わせるだけで、
+   キャッシュするかどうかは `mapping.Service` の実装（モック or 本物のクライアント）側の詳細とする
+   （既存のPhase3方針「キャッシュを内部に持つかどうかはこの実装側の詳細」を踏襲）。
+2. **Port→VPCの解決**：`port.Port.Name()` をキーに、MappingServiceへ別途問い合わせる
+   （`VPCForPort`）。`dhcp.Handler` は自前の状態を持たず、`HandleFrame` の中で毎回解決する
+   （Discoverを覚えていなくてもRequestだけ処理できる、という既存のステートレス方針と一致）。
+3. **DHCPサーバを名乗るMAC/IP**：MACはVPC共通の固定値（既存の `-dhcp-server-mac` 相当）を維持する。
+   IP（ゲートウェイ・サーバ識別子）はVPCごとのサブネットの「ネットワークアドレス + 1」として
+   都度計算する。MappingServiceはゲートウェイIPを直接返す必要はなく、サブネット
+   （ネットワークアドレス + マスク）さえ返せばdhcp側で導出できる。
+4. **キャッシュ**：`dhcp.Handler` / `vpc-agent` はキャッシュを持たない。キャッシュするかどうかは
+   `mapping.Service` の実装側の責務とする（本物のMappingServiceクライアントの実装issueに回す）。
+
+### インターフェース変更案
+
+```go
+package mapping
+
+type VPCID string
+
+// Lease は VPC 内で mac に割り当てる（または割り当て済みの）リース情報。
+type Lease struct {
+	IP        net.IP
+	Subnet    *net.IPNet // ネットワークアドレス + マスク。ゲートウェイはSubnetから導出する。
+	LeaseTime uint32
+}
+
+type Service interface {
+	// VPCForPort は port 名からその port が所属する VPC の識別子を返す。
+	VPCForPort(portName string) (vpcID VPCID, ok bool)
+	// Lookup は vpcID 内で mac に割り当てるリース情報を返す。
+	Lookup(vpcID VPCID, mac net.HardwareAddr) (lease Lease, ok bool)
+}
+```
+
+### `dhcp.Handler` の変更
+
+```go
+type Handler struct {
+	Mapping   mapping.Service
+	ServerMAC net.HardwareAddr // VPC共通の固定MAC
+}
+```
+
+- `HandleFrame` 内で `p.Name()` → `VPCForPort` → `vpcID` を解決し、`Lookup(vpcID, mac)` でリースを得る。
+- `ServerIP`（ゲートウェイ兼サーバ識別子）は `lease.Subnet` のネットワークアドレス+1として
+  都度計算するヘルパー（例: `gatewayOf(subnet *net.IPNet) net.IP`）を新設する。
+- `SubnetMask` / `LeaseTime` は `lease` から取る（Handlerのフィールドからは外す）。
+
+### `mock.go` の変更
+
+- 単一プールではなく、`VPCID → (サブネット, プール, リース時間)` のマップと、
+  `Port名 → VPCID` のマップを持つ。
+- 現状1エージェント=1Portなので、モックの設定もその範囲で十分
+  （複数VPC対応は本物のMappingService連携issueに回す）。
+
+### `main.go` / フラグの変更
+
+- 削除：`-dhcp-server-ip`、`-dhcp-subnet-mask`（→ `-dhcp-subnet` のCIDR表記に統合）
+- 追加：`-dhcp-vpc-id`（モックが「このPortはこのVPC」と答えるための値）、
+  `-dhcp-subnet`（例 `"10.10.0.0/24"`）
+- 維持：`-dhcp-server-mac`、`-dhcp-lease-seconds`、`-dhcp-pool`
+
+### 残課題（後続issue）
+
+- 本物のMappingServiceとの通信（HTTP/gRPCなど）実装
+- Port→VPCの解決結果や静的VPC情報を、本物のクライアント側でどうキャッシュ・Watchするか
+- 1エージェントが複数Portを扱うようになった場合の `VPCForPort` 呼び出し頻度の最適化
