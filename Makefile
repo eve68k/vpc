@@ -1,4 +1,4 @@
-.PHONY: build test vet lab-image lab-shell netns-up netns-down smoke
+.PHONY: build test vet lab-image lab-shell netns-up netns-down smoke dhcp-smoke dhcp-smoke
 
 IMAGE ?= vpc-lab
 
@@ -27,3 +27,6 @@ netns-down:
 
 smoke:
 	./lab/smoke.sh
+
+dhcp-smoke:
+	./lab/dhcp-smoke.sh

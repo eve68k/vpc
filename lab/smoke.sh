@@ -10,7 +10,8 @@ pid=$!
 trap 'kill $pid 2>/dev/null || true' EXIT
 sleep 1
 
-# ゲートウェイは未実装のため ping 自体は失敗する。ARP request が agent に届けば OK。
+# DHCP 未使用のため vm1 に一時的にIPを振る。ゲートウェイは未実装のため ping 自体は失敗する。ARP request が agent に届けば OK。
+ip -n vm1 addr add 10.10.0.1/24 dev eth0
 ip netns exec vm1 ping -c 1 -W 1 10.10.0.254 >/dev/null 2>&1 || true
 sleep 1
 
