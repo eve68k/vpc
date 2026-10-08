@@ -39,10 +39,21 @@ VPC が異なれば IP や MAC が重なってよい。
 - 本番: VM の NIC ごとにできる PVE の tap を `vmbr` から切り離し (`ip link set tapXXXi0 nomaster`)、
   agent が直接読み書きする。この tap が VNI の Port になる。
   切り離しは Proxmox の hookscript (post-start) で NIC ごとに自動化する。VM の NIC は `firewall=0` にする。
+  agent は 1 ホストに 1 プロセスで、全 VNI の Port をそれぞれ別の goroutine で読む。
 - 開発: veth（[dev-environment.md](dev-environment.md)）。
 - テスト: メモリ実装 (`vni.NewMemPair`)。
 - 実装は AF_PACKET を基本とする。XDP / AF_XDP は README の通り現時点では対象外で、
   `vni.Port` の差し替えで後から導入できる構造にしておく。
+
+### VNI の増減（Source / Sink）
+
+Port の増減は `agent.Source` が知り、`agent.Sink`（`agent.Manager`）の `Attach(name)` / `Detach(name)` に伝える。
+Sink は port 名だけを受け取り、VPCID や MAC はマッピングサービスから引く。
+
+- 現状: hookscript の post-start / post-stop が agent の unix socket（`ctl.Server`）に PUT / DELETE する。
+  モックのマッピングサービスは VNI を持たないため、PUT の body で `vpc_id` と `mac` を渡して登録させる。
+- 将来: マッピングサービスの Watch で、このホストに VNI が現れた / 消えたことを受ける Source に差し替える。
+  Sink と、Sink より下は変わらない。
 
 ### マッピングサービス
 

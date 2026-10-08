@@ -49,10 +49,21 @@ make netns-down
 手動で試す場合:
 
 ```bash
-ip netns exec pve1 ./bin/vpc-agent -port-if tap-vm1 -vni-mac 02:00:00:00:00:01 &
+ip netns exec pve1 ./bin/vpc-agent -ctl-socket /tmp/pve1.sock -port-if tap-vm1 -vni-mac 02:00:00:00:00:01 &
 ip netns exec vm1 ping 10.10.0.254
 ip netns exec pve1 tcpdump -i tap-vm1 -e
 ```
+
+`-port-if` は起動時に 1 本だけ Attach する便宜用で、省略できる。
+実行中の増減は `-ctl-socket` の unix socket に対して、hookscript と同じ要領で行う。
+
+```bash
+curl --unix-socket /tmp/pve1.sock -X PUT http://agent/vnis/tap-vm2 \
+  -d '{"vpc_id": 1, "mac": "02:00:00:00:00:02"}'
+curl --unix-socket /tmp/pve1.sock -X DELETE http://agent/vnis/tap-vm2
+```
+
+netns は別でもファイルシステムは共有されるため、agent ごとに別の `-ctl-socket` を指定する。
 
 ## Port の差し替え
 
