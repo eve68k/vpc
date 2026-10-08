@@ -1,6 +1,7 @@
 package dhcp
 
 import (
+	"bytes"
 	"net"
 
 	"github.com/eve68k/vpc/internal/frame"
@@ -34,8 +35,12 @@ func (h *Handler) HandleFrame(b []byte, p vni.Port) (handled bool, err error) {
 		return true, err
 	}
 
-	vpcID, ok := h.Mapping.VPCForPort(p.Name())
+	vni, ok := h.Mapping.VNIForPort(p.Name())
 	if !ok {
+		return true, nil
+	}
+	// 他のVNIのMACを名乗らせない。L2の送信元とDHCPのCHAddrの両方を確かめる。
+	if !bytes.Equal(eth.Src, vni.MAC) || !bytes.Equal(msg.CHAddr, vni.MAC) {
 		return true, nil
 	}
 
@@ -43,9 +48,9 @@ func (h *Handler) HandleFrame(b []byte, p vni.Port) (handled bool, err error) {
 	var serverIP net.IP
 	switch msg.Type {
 	case MessageTypeDiscover:
-		reply, serverIP = h.handleDiscover(vpcID, msg)
+		reply, serverIP = h.handleDiscover(vni.VPCID, msg)
 	case MessageTypeRequest:
-		reply, serverIP = h.handleRequest(vpcID, msg)
+		reply, serverIP = h.handleRequest(vni.VPCID, msg)
 	default:
 		return true, nil
 	}

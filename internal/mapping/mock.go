@@ -14,7 +14,7 @@ type VPCConfig struct {
 
 // mockService はプールから順に割り当てるだけのインメモリ実装。
 type mockService struct {
-	portVPC map[string]VPCID
+	vnis map[string]VNI
 
 	mu   sync.Mutex
 	vpcs map[VPCID]*mockVPC
@@ -26,19 +26,22 @@ type mockVPC struct {
 	byMAC map[string]net.IP
 }
 
-// NewMock は portVPC（Port名 → VPCID）と vpcs（VPCID → 設定）から、
+// NewMock は登録済みの vnis と vpcs（VPCID → 設定）から、
 // VPCごとのプールでMACごとに順番にIPを割り当てる Service を返す。
-func NewMock(portVPC map[string]VPCID, vpcs map[VPCID]VPCConfig) Service {
-	m := &mockService{portVPC: portVPC, vpcs: make(map[VPCID]*mockVPC, len(vpcs))}
+func NewMock(vnis []VNI, vpcs map[VPCID]VPCConfig) Service {
+	m := &mockService{vnis: make(map[string]VNI, len(vnis)), vpcs: make(map[VPCID]*mockVPC, len(vpcs))}
+	for _, v := range vnis {
+		m.vnis[v.Name] = v
+	}
 	for id, cfg := range vpcs {
 		m.vpcs[id] = &mockVPC{cfg: cfg, byMAC: make(map[string]net.IP)}
 	}
 	return m
 }
 
-func (m *mockService) VPCForPort(portName string) (VPCID, bool) {
-	id, ok := m.portVPC[portName]
-	return id, ok
+func (m *mockService) VNIForPort(portName string) (VNI, bool) {
+	v, ok := m.vnis[portName]
+	return v, ok
 }
 
 func (m *mockService) Lookup(vpcID VPCID, mac net.HardwareAddr) (Lease, bool) {

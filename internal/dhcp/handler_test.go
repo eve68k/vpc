@@ -35,13 +35,14 @@ func buildClientFrame(t *testing.T, msg *Message) []byte {
 
 const testVPCID mapping.VPCID = 1
 
-// newTestHandler は "server" という名前のPortがVPC 1（10.10.0.0/24）に所属するHandlerを返す。
+// newTestHandler は "server" という名前のPortがVPC 1（10.10.0.0/24）に属し、
+// testClientMAC を持つVNIとして登録されているHandlerを返す。
 func newTestHandler() *Handler {
 	_, subnet, _ := net.ParseCIDR("10.10.0.0/24")
 	pool := []net.IP{net.IPv4(10, 10, 0, 2), net.IPv4(10, 10, 0, 3)}
 	return &Handler{
 		Mapping: mapping.NewMock(
-			map[string]mapping.VPCID{"server": testVPCID},
+			[]mapping.VNI{{Name: "server", VPCID: testVPCID, MAC: testClientMAC}},
 			map[mapping.VPCID]mapping.VPCConfig{testVPCID: {Subnet: subnet, Pool: pool, LeaseTime: 3600}},
 		),
 		ServerMAC: testServerMAC,
@@ -287,6 +288,58 @@ func TestHandler_VPCに属さないPortのフレームには応答しない(t *t
 	}
 	a.Close()
 	b.Close()
+}
+
+func TestHandler_VNIのMACと異なる送信元には応答しない(t *testing.T) {
+	otherMAC := net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0x99}
+
+	cases := []struct {
+		name  string
+		frame func(t *testing.T) []byte
+	}{
+		{
+			name: "DHCPのCHAddrが異なる",
+			frame: func(t *testing.T) []byte {
+				return buildClientFrame(t, &Message{Op: OpBootRequest, CHAddr: otherMAC, Type: MessageTypeDiscover})
+			},
+		},
+		{
+			name: "Ethernetの送信元MACが異なる",
+			frame: func(t *testing.T) []byte {
+				f := buildClientFrame(t, &Message{Op: OpBootRequest, CHAddr: testClientMAC, Type: MessageTypeDiscover})
+				copy(f[6:12], otherMAC)
+				return f
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := vni.NewMemPair("client", "server")
+			defer a.Close()
+			h := newTestHandler()
+
+			handled, err := h.HandleFrame(tc.frame(t), b)
+			if err != nil {
+				t.Fatalf("HandleFrame: %v", err)
+			}
+			if !handled {
+				t.Fatalf("got handled=false, want true")
+			}
+
+			result := make(chan struct{}, 1)
+			go func() {
+				rb := make([]byte, 2048)
+				if _, err := a.ReadFrame(rb); err == nil {
+					result <- struct{}{}
+				}
+			}()
+			select {
+			case <-result:
+				t.Fatalf("got a reply frame, want none")
+			case <-time.After(50 * time.Millisecond):
+			}
+		})
+	}
 }
 
 func TestGatewayOf_ネットワークアドレスの次のIPを返す(t *testing.T) {

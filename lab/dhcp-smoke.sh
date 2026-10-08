@@ -10,7 +10,7 @@ pids=()
 trap 'kill "${pids[@]}" 2>/dev/null || true; rm -rf "$work"' EXIT
 
 for i in 1 2; do
-  ip netns exec "pve${i}" ./bin/vpc-agent -port-if "tap-vm${i}" >"$work/agent${i}.log" 2>&1 &
+  ip netns exec "pve${i}" ./bin/vpc-agent -port-if "tap-vm${i}" -vni-mac "02:00:00:00:00:0${i}" >"$work/agent${i}.log" 2>&1 &
   pids+=($!)
 done
 sleep 1

@@ -21,10 +21,14 @@ func main() {
 	kind := flag.String("port-kind", "afpacket", "Port 実装 (afpacket)")
 	ifname := flag.String("port-if", "", "VM 側に向くインターフェース名 (tap / veth)")
 	dhcpServerMAC := flag.String("dhcp-server-mac", "02:00:00:00:00:fe", "DHCPサーバとして名乗るMACアドレス")
+	vniMAC := flag.String("vni-mac", "", "このPortに対応するVNIのMACアドレス（モックMappingService用）")
 	dhcpVPCID := flag.Uint("dhcp-vpc-id", 1, "このPortが所属するVPCのID（モックMappingService用）")
 	flag.Parse()
 	if *ifname == "" {
 		log.Fatal("-port-if is required")
+	}
+	if *vniMAC == "" {
+		log.Fatal("-vni-mac is required")
 	}
 
 	p, err := vni.Open(*kind, *ifname)
@@ -37,7 +41,7 @@ func main() {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() { <-sig; p.Close() }()
 
-	h, err := newDHCPHandler(*dhcpServerMAC, p.Name(), mapping.VPCID(*dhcpVPCID))
+	h, err := newDHCPHandler(*dhcpServerMAC, *vniMAC, p.Name(), mapping.VPCID(*dhcpVPCID))
 	if err != nil {
 		log.Fatalf("dhcp setup: %v", err)
 	}
@@ -72,8 +76,12 @@ func main() {
 	}
 }
 
-func newDHCPHandler(serverMAC, portName string, vpcID mapping.VPCID) (*dhcp.Handler, error) {
+func newDHCPHandler(serverMAC, vniMAC, portName string, vpcID mapping.VPCID) (*dhcp.Handler, error) {
 	mac, err := net.ParseMAC(serverMAC)
+	if err != nil {
+		return nil, err
+	}
+	clientMAC, err := net.ParseMAC(vniMAC)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +98,7 @@ func newDHCPHandler(serverMAC, portName string, vpcID mapping.VPCID) (*dhcp.Hand
 
 	return &dhcp.Handler{
 		Mapping: mapping.NewMock(
-			map[string]mapping.VPCID{portName: vpcID},
+			[]mapping.VNI{{Name: portName, VPCID: vpcID, MAC: clientMAC}},
 			map[mapping.VPCID]mapping.VPCConfig{vpcID: {Subnet: subnet, Pool: pool, LeaseTime: 3600}},
 		),
 		ServerMAC: mac,

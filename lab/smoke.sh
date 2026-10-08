@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 make build >/dev/null
 
 out=$(mktemp)
-ip netns exec pve1 ./bin/vpc-agent -port-if tap-vm1 >"$out" 2>&1 &
+ip netns exec pve1 ./bin/vpc-agent -port-if tap-vm1 -vni-mac 02:00:00:00:00:01 >"$out" 2>&1 &
 pid=$!
 trap 'kill $pid 2>/dev/null || true' EXIT
 sleep 1

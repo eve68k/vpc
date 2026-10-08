@@ -49,7 +49,7 @@ make netns-down
 手動で試す場合:
 
 ```bash
-ip netns exec pve1 ./bin/vpc-agent -port-if tap-vm1 &
+ip netns exec pve1 ./bin/vpc-agent -port-if tap-vm1 -vni-mac 02:00:00:00:00:01 &
 ip netns exec vm1 ping 10.10.0.254
 ip netns exec pve1 tcpdump -i tap-vm1 -e
 ```

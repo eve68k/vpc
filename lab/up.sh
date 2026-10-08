@@ -44,4 +44,4 @@ done
 echo "lab is up:"
 echo "  vm1 (pve1) / vm2 (pve2): IP は DHCP で取得"
 echo "  underlay: pve1=192.168.100.1 pve2=192.168.100.2"
-echo "例: ip netns exec pve1 ./bin/vpc-agent -port-if tap-vm1"
+echo "例: ip netns exec pve1 ./bin/vpc-agent -port-if tap-vm1 -vni-mac 02:00:00:00:00:01"
