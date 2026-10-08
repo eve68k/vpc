@@ -1,5 +1,5 @@
-// Package port は VM の L2 出口（本番では tap、開発では veth）を抽象化する。
-package port
+// Package vni は VNI の L2 出口である Port（本番では tap、開発では veth）を抽象化する。
+package vni
 
 import "errors"
 

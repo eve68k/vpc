@@ -14,7 +14,7 @@ import (
 
 	"github.com/eve68k/vpc/internal/dhcp"
 	"github.com/eve68k/vpc/internal/mapping"
-	"github.com/eve68k/vpc/port"
+	"github.com/eve68k/vpc/vni"
 )
 
 func main() {
@@ -27,7 +27,7 @@ func main() {
 		log.Fatal("-port-if is required")
 	}
 
-	p, err := port.Open(*kind, *ifname)
+	p, err := vni.Open(*kind, *ifname)
 	if err != nil {
 		log.Fatalf("open port: %v", err)
 	}
@@ -47,7 +47,7 @@ func main() {
 	for {
 		n, err := p.ReadFrame(buf)
 		if err != nil {
-			if errors.Is(err, port.ErrClosed) {
+			if errors.Is(err, vni.ErrClosed) {
 				return
 			}
 			log.Fatalf("read: %v", err)

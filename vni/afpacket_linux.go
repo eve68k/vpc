@@ -1,6 +1,6 @@
 //go:build linux
 
-package port
+package vni
 
 import (
 	"fmt"

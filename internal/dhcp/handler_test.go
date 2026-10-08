@@ -7,7 +7,7 @@ import (
 
 	"github.com/eve68k/vpc/internal/frame"
 	"github.com/eve68k/vpc/internal/mapping"
-	"github.com/eve68k/vpc/port"
+	"github.com/eve68k/vpc/vni"
 )
 
 var (
@@ -105,7 +105,7 @@ func TestIdentifyRequest_正しいDHCPフレームは判定される(t *testing.
 }
 
 func TestHandler_DiscoverフレームからOfferが届く(t *testing.T) {
-	a, b := port.NewMemPair("client", "server")
+	a, b := vni.NewMemPair("client", "server")
 	h := newTestHandler()
 
 	discover := buildClientFrame(t, &Message{Op: OpBootRequest, CHAddr: testClientMAC, Type: MessageTypeDiscover})
@@ -172,7 +172,7 @@ func TestHandler_DiscoverフレームからOfferが届く(t *testing.T) {
 }
 
 func TestHandler_RequestしたIPがMappingServiceと一致すればAckが届く(t *testing.T) {
-	a, b := port.NewMemPair("client", "server")
+	a, b := vni.NewMemPair("client", "server")
 	h := newTestHandler()
 
 	// 同じMACで先にDiscoverさせ、割り当てを確定させる。
@@ -217,7 +217,7 @@ func TestHandler_RequestしたIPがMappingServiceと一致すればAckが届く(
 }
 
 func TestHandler_割り当てと異なるRequestedIPは無視される(t *testing.T) {
-	a, b := port.NewMemPair("client", "server")
+	a, b := vni.NewMemPair("client", "server")
 	h := newTestHandler()
 	h.Mapping.Lookup(testVPCID, testClientMAC) // 先に割り当てておく
 
@@ -261,7 +261,7 @@ func TestHandler_割り当てと異なるRequestedIPは無視される(t *testin
 }
 
 func TestHandler_VPCに属さないPortのフレームには応答しない(t *testing.T) {
-	a, b := port.NewMemPair("client", "unknown")
+	a, b := vni.NewMemPair("client", "unknown")
 	h := newTestHandler()
 
 	discover := buildClientFrame(t, &Message{Op: OpBootRequest, CHAddr: testClientMAC, Type: MessageTypeDiscover})

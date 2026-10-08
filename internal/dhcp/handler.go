@@ -5,7 +5,7 @@ import (
 
 	"github.com/eve68k/vpc/internal/frame"
 	"github.com/eve68k/vpc/internal/mapping"
-	"github.com/eve68k/vpc/port"
+	"github.com/eve68k/vpc/vni"
 )
 
 const (
@@ -23,7 +23,7 @@ type Handler struct {
 
 // HandleFrame はフレームを受け取り、クライアント→サーバ方向のDHCPメッセージであれば
 // 処理して p に応答を書き込む。DHCP以外のフレームは何もせず handled=false を返す。
-func (h *Handler) HandleFrame(b []byte, p port.Port) (handled bool, err error) {
+func (h *Handler) HandleFrame(b []byte, p vni.Port) (handled bool, err error) {
 	eth, _, udp, ok := identifyRequest(b)
 	if !ok {
 		return false, nil
