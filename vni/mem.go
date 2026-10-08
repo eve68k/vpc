@@ -36,6 +36,13 @@ func (p *memPort) ReadFrame(buf []byte) (int, error) {
 }
 
 func (p *memPort) WriteFrame(frame []byte) error {
+	// 閉じた後は tx に空きがあっても失敗させる。下の select は両 case が準備済みだと
+	// ランダムに選ぶため、先に done を見ないと書き込みが成功することがある。
+	select {
+	case <-p.link.done:
+		return ErrClosed
+	default:
+	}
 	cp := make([]byte, len(frame))
 	copy(cp, frame)
 	select {
